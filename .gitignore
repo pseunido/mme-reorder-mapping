@@ -361,3 +361,11 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+#-----
+
+# Ignore locally provided vendor DLLs
+libs/**
+
+# keep a README inside libs so new devs know what to place
+!libs/README.md
