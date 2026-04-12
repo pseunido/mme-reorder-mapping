@@ -1,29 +1,12 @@
 ﻿using PEPlugin;
-using PEPlugin.Form;
-using PEPlugin.Pmd;
 using PEPlugin.Pmx;
-using PEPlugin.SDX;
-using PEPlugin.View;
-using PEPlugin.Vmd;
-using PEPlugin.Vme;
-using PXCPlugin;
-using SlimDX;
-using SlimDX.Direct3D9;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
-using IBS = PEPlugin.Vme.IPEVmeBoneState;
-using ICS = PEPlugin.Vme.IPEVmeCameraState;
-using IES = PEPlugin.Vme.IPEVmeEventState;
-using ILS = PEPlugin.Vme.IPEVmeLightState;
-using IMS = PEPlugin.Vme.IPEVmeSingleValueState;
-using ISS = PEPlugin.Vme.IPEVmeSingleValueState;
 
 public class CSScriptClass : PEPluginClass
 {
@@ -64,11 +47,22 @@ public class CSScriptClass : PEPluginClass
 
     private static RemapExecutionResult ExecuteRemap(PluginInput input, IList<string> currentMaterialNames)
     {
-        List<string> baseMaterialNames = new List<string>(currentMaterialNames);
-        List<string> modifiedMaterialNames = PmxMaterialReader.ReadMaterialNames(input.ModifiedPmxPath);
-
         EmmDocument document = EmmDocument.Load(input.EmmPath);
-        EmmObjectMatch objectMatch = document.FindObjectByMaterialNames(baseMaterialNames);
+        List<string> baseMaterialNames;
+        EmmObjectMatch objectMatch;
+
+        if (input.BasePmxPath.Length > 0)
+        {
+            baseMaterialNames = PmxMaterialReader.ReadMaterialNames(input.BasePmxPath);
+            objectMatch = document.FindObjectByPath(input.BasePmxPath);
+        }
+        else
+        {
+            baseMaterialNames = new List<string>(currentMaterialNames);
+            objectMatch = document.FindObjectByMaterialNames(baseMaterialNames);
+        }
+
+        List<string> modifiedMaterialNames = PmxMaterialReader.ReadMaterialNames(input.ModifiedPmxPath);
         string objectKey = objectMatch.ObjectKey;
 
         Dictionary<int, int> materialMap = MaterialIndexMapper.BuildMap(baseMaterialNames, modifiedMaterialNames);
@@ -152,6 +146,11 @@ public class CSScriptClass : PEPluginClass
             throw new FileNotFoundException("入力EMMが見つかりません。", input.EmmPath);
         }
 
+        if (input.BasePmxPath.Length > 0 && !File.Exists(input.BasePmxPath))
+        {
+            throw new FileNotFoundException("改造前PMXが見つかりません。", input.BasePmxPath);
+        }
+
         if (input.ModifiedPmxPath.Length == 0)
         {
             throw new InvalidOperationException("改造後PMXを指定してください。");
@@ -172,6 +171,16 @@ public class CSScriptClass : PEPluginClass
     {
         StringBuilder builder = new StringBuilder();
         builder.AppendLine("EMM の再マップが完了しました。");
+        builder.AppendLine();
+        if (result.Input.BasePmxPath.Length > 0)
+        {
+            builder.AppendLine("改造前PMX指定: あり");
+            builder.AppendLine("改造前PMX: " + result.Input.BasePmxPath);
+        }
+        else
+        {
+            builder.AppendLine("改造前PMX指定: なし (現在ロード中モデルを使用)");
+        }
         builder.AppendLine();
         builder.AppendLine("対象モデルキー: " + result.ObjectKey);
         builder.AppendLine("EMM 内の元モデル: " + result.SourceObjectPath);
@@ -229,6 +238,7 @@ public class CSScriptClass : PEPluginClass
 
 internal sealed class PluginInput
 {
+    public string BasePmxPath = string.Empty;
     public string EmmPath = string.Empty;
     public string ModifiedPmxPath = string.Empty;
     public string OutputEmmPath = string.Empty;
@@ -493,10 +503,81 @@ internal sealed class EmmDocument
 
         if (exactMatches.Count > 1)
         {
-            throw new InvalidOperationException("EMM 内で現在ロード中モデルに一致するオブジェクトキーが複数見つかりました。");
+            throw new InvalidOperationException("EMM 内で現在ロード中モデルに一致するオブジェクトキーが複数見つかりました。改造前PMX(任意)を指定して対象を明示してください。");
         }
 
         throw new InvalidOperationException("EMM 内で現在ロード中モデルに対応するオブジェクトキーを見つけられませんでした。現在の材質構成と一致する PMX が [Object] セクションにあるか確認してください。");
+    }
+
+    public EmmObjectMatch FindObjectByPath(string modelPath)
+    {
+        EmmSection objectSection = GetSection("Object");
+        if (objectSection == null)
+        {
+            throw new InvalidOperationException("EMM に [Object] セクションがありません。");
+        }
+
+        string normalizedTargetPath = PathHelper.NormalizePath(modelPath);
+        List<EmmObjectMatch> exactMatches = new List<EmmObjectMatch>();
+        List<EmmObjectMatch> fileNameMatches = new List<EmmObjectMatch>();
+        string targetFileName = Path.GetFileName(modelPath);
+
+        for (int index = 0; index < objectSection.Lines.Count; index++)
+        {
+            KeyValueLine line;
+            if (!KeyValueLine.TryParse(objectSection.Lines[index], out line))
+            {
+                continue;
+            }
+
+            ParsedObjectKey key;
+            if (!ParsedObjectKey.TryParse(line.Key, out key))
+            {
+                continue;
+            }
+
+            if (key.MaterialIndex.HasValue || key.IsShow)
+            {
+                continue;
+            }
+
+            EmmObjectMatch match = new EmmObjectMatch();
+            match.ObjectKey = key.ObjectKey;
+            match.ObjectPath = line.Value;
+
+            string normalizedLinePath = PathHelper.NormalizePath(line.Value);
+            if (string.Equals(normalizedLinePath, normalizedTargetPath, StringComparison.OrdinalIgnoreCase))
+            {
+                exactMatches.Add(match);
+            }
+
+            if (string.Equals(Path.GetFileName(line.Value), targetFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                fileNameMatches.Add(match);
+            }
+        }
+
+        if (exactMatches.Count == 1)
+        {
+            return exactMatches[0];
+        }
+
+        if (exactMatches.Count > 1)
+        {
+            throw new InvalidOperationException("EMM 内で改造前PMXに一致するオブジェクトキーが複数見つかりました。");
+        }
+
+        if (fileNameMatches.Count == 1)
+        {
+            return fileNameMatches[0];
+        }
+
+        if (fileNameMatches.Count > 1)
+        {
+            throw new InvalidOperationException("EMM 内で同名PMXが複数見つかりました。改造前PMXの絶対パス一致で特定できるように EMM 内容を確認してください。");
+        }
+
+        throw new InvalidOperationException("EMM 内で指定した改造前PMXに対応するオブジェクトキーを見つけられませんでした。");
     }
 
     public void UpdateObjectPath(string objectKey, string newPath)
@@ -1022,6 +1103,7 @@ internal static class PmxMaterialReader
 
 internal sealed class MainForm : Form
 {
+    private readonly TextBox _basePmxTextBox;
     private readonly TextBox _emmTextBox;
     private readonly TextBox _modifiedPmxTextBox;
     private readonly TextBox _outputEmmTextBox;
@@ -1033,7 +1115,7 @@ internal sealed class MainForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(720, 260);
+        ClientSize = new Size(720, 352);
 
         Font = SystemFonts.MessageBoxFont;
 
@@ -1041,7 +1123,7 @@ internal sealed class MainForm : Form
         descriptionLabel.AutoSize = false;
         descriptionLabel.Location = new Point(12, 12);
         descriptionLabel.Size = new Size(696, 44);
-        descriptionLabel.Text = "現在 PMXEditor に読み込まれているモデルを改造前モデルとして扱い、入力EMM・改造後PMX・出力EMMを指定して材質名ベースで再マップします。"
+        descriptionLabel.Text = "改造前PMX(任意)が未指定なら現在ロード中モデルを改造前として使用し、指定時はそのPMXを優先します。"
             + Environment.NewLine
             + "各入力欄はファイルのドラッグ＆ドロップにも対応しています。";
         Controls.Add(descriptionLabel);
@@ -1053,13 +1135,14 @@ internal sealed class MainForm : Form
         currentModelLabel.Text = "現在モデル: " + currentModelHint;
         Controls.Add(currentModelLabel);
 
-        _emmTextBox = AddPathRow("入力EMM", 108, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
-        _modifiedPmxTextBox = AddPathRow("改造後PMX", 154, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
-        _outputEmmTextBox = AddSavePathRow("出力EMM", 200, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
+        _basePmxTextBox = AddPathRow("改造前PMX(任意)", 108, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
+        _emmTextBox = AddPathRow("入力EMM", 154, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
+        _modifiedPmxTextBox = AddPathRow("改造後PMX", 200, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
+        _outputEmmTextBox = AddSavePathRow("出力EMM", 246, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
 
         Button runButton = new Button();
         runButton.Text = "実行";
-        runButton.Location = new Point(552, 226);
+        runButton.Location = new Point(552, 318);
         runButton.Size = new Size(75, 28);
         runButton.Click += delegate
         {
@@ -1077,7 +1160,7 @@ internal sealed class MainForm : Form
 
         Button cancelButton = new Button();
         cancelButton.Text = "キャンセル";
-        cancelButton.Location = new Point(633, 226);
+        cancelButton.Location = new Point(633, 318);
         cancelButton.Size = new Size(75, 28);
         cancelButton.DialogResult = DialogResult.Cancel;
         Controls.Add(cancelButton);
@@ -1112,6 +1195,7 @@ internal sealed class MainForm : Form
     public PluginInput BuildInput()
     {
         PluginInput input = new PluginInput();
+        input.BasePmxPath = _basePmxTextBox.Text.Trim();
         input.EmmPath = _emmTextBox.Text.Trim();
         input.ModifiedPmxPath = _modifiedPmxTextBox.Text.Trim();
         input.OutputEmmPath = _outputEmmTextBox.Text.Trim();
@@ -1120,6 +1204,12 @@ internal sealed class MainForm : Form
 
     private string ValidateForDialog()
     {
+        string basePmxPath = _basePmxTextBox.Text.Trim();
+        if (basePmxPath.Length > 0 && !File.Exists(basePmxPath))
+        {
+            return "改造前PMXが見つかりません。";
+        }
+
         string emmPath = _emmTextBox.Text.Trim();
         if (emmPath.Length == 0)
         {
@@ -1169,10 +1259,10 @@ internal sealed class MainForm : Form
         Controls.Add(label);
 
         TextBox textBox = new TextBox();
-        textBox.Location = new Point(88, top);
-        textBox.Size = new Size(540, 23);
+        textBox.Location = new Point(136, top);
+        textBox.Size = new Size(492, 23);
         textBox.AllowDrop = true;
-        textBox.DragEnter += delegate(object sender, DragEventArgs e)
+        textBox.DragEnter += delegate (object sender, DragEventArgs e)
         {
             if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
             {
@@ -1183,7 +1273,7 @@ internal sealed class MainForm : Form
                 e.Effect = DragDropEffects.None;
             }
         };
-        textBox.DragDrop += delegate(object sender, DragEventArgs e)
+        textBox.DragDrop += delegate (object sender, DragEventArgs e)
         {
             if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop))
             {
