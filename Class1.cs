@@ -42,7 +42,7 @@ public class CSScriptClass : PEPluginClass
             IPXPmx pmx = connect.Pmx.GetCurrentState();
             List<string> currentMaterialNames = BuildCurrentMaterialNameList(pmx);
 
-            using (MainForm form = new MainForm(BuildCurrentModelPathHint(pmx), BuildMaterialNames(pmx)))
+            using (MainForm form = new MainForm(BuildCurrentModelPathHint(pmx)))
             {
                 if (form.ShowDialog() != DialogResult.OK)
                 {
@@ -115,30 +115,6 @@ public class CSScriptClass : PEPluginClass
         }
 
         return name;
-    }
-
-    private static List<string> BuildMaterialNames(IPXPmx pmx)
-    {
-        List<string> names = new List<string>();
-
-        if (pmx == null || pmx.Material == null)
-        {
-            return names;
-        }
-
-        for (int index = 0; index < pmx.Material.Count; index++)
-        {
-            IPXMaterial material = pmx.Material[index];
-            string name = SafeString(material != null ? material.Name : null);
-            if (name.Length == 0)
-            {
-                name = "(材質名なし)";
-            }
-
-            names.Add(index.ToString() + ": " + name);
-        }
-
-        return names;
     }
 
     private static List<string> BuildCurrentMaterialNameList(IPXPmx pmx)
@@ -1049,16 +1025,15 @@ internal sealed class MainForm : Form
     private readonly TextBox _emmTextBox;
     private readonly TextBox _modifiedPmxTextBox;
     private readonly TextBox _outputEmmTextBox;
-    private readonly ListBox _materialListBox;
 
-    public MainForm(string currentModelHint, IList<string> materialNames)
+    public MainForm(string currentModelHint)
     {
         Text = "MME EMM再マップ";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(720, 520);
+        ClientSize = new Size(720, 260);
 
         Font = SystemFonts.MessageBoxFont;
 
@@ -1068,7 +1043,7 @@ internal sealed class MainForm : Form
         descriptionLabel.Size = new Size(696, 44);
         descriptionLabel.Text = "現在 PMXEditor に読み込まれているモデルを改造前モデルとして扱い、入力EMM・改造後PMX・出力EMMを指定して材質名ベースで再マップします。"
             + Environment.NewLine
-            + "同名材質が複数ある場合は、出現順で対応付けます。";
+            + "各入力欄はファイルのドラッグ＆ドロップにも対応しています。";
         Controls.Add(descriptionLabel);
 
         Label currentModelLabel = new Label();
@@ -1082,29 +1057,9 @@ internal sealed class MainForm : Form
         _modifiedPmxTextBox = AddPathRow("改造後PMX", 154, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
         _outputEmmTextBox = AddSavePathRow("出力EMM", 200, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
 
-        Label materialLabel = new Label();
-        materialLabel.AutoSize = true;
-        materialLabel.Location = new Point(12, 252);
-        materialLabel.Text = "現在モデルの材質一覧";
-        Controls.Add(materialLabel);
-
-        _materialListBox = new ListBox();
-        _materialListBox.Location = new Point(12, 274);
-        _materialListBox.Size = new Size(696, 194);
-        _materialListBox.HorizontalScrollbar = true;
-        Controls.Add(_materialListBox);
-
-        if (materialNames != null)
-        {
-            foreach (string materialName in materialNames)
-            {
-                _materialListBox.Items.Add(materialName);
-            }
-        }
-
         Button runButton = new Button();
         runButton.Text = "実行";
-        runButton.Location = new Point(552, 480);
+        runButton.Location = new Point(552, 226);
         runButton.Size = new Size(75, 28);
         runButton.Click += delegate
         {
@@ -1122,7 +1077,7 @@ internal sealed class MainForm : Form
 
         Button cancelButton = new Button();
         cancelButton.Text = "キャンセル";
-        cancelButton.Location = new Point(633, 480);
+        cancelButton.Location = new Point(633, 226);
         cancelButton.Size = new Size(75, 28);
         cancelButton.DialogResult = DialogResult.Cancel;
         Controls.Add(cancelButton);
@@ -1216,6 +1171,39 @@ internal sealed class MainForm : Form
         TextBox textBox = new TextBox();
         textBox.Location = new Point(88, top);
         textBox.Size = new Size(540, 23);
+        textBox.AllowDrop = true;
+        textBox.DragEnter += delegate(object sender, DragEventArgs e)
+        {
+            if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effect = DragDropEffects.Copy;
+            }
+            else
+            {
+                e.Effect = DragDropEffects.None;
+            }
+        };
+        textBox.DragDrop += delegate(object sender, DragEventArgs e)
+        {
+            if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                return;
+            }
+
+            string[] dropped = e.Data.GetData(DataFormats.FileDrop) as string[];
+            if (dropped == null || dropped.Length == 0)
+            {
+                return;
+            }
+
+            string path = dropped[0];
+            if (!saveMode && Directory.Exists(path))
+            {
+                return;
+            }
+
+            textBox.Text = path;
+        };
         Controls.Add(textBox);
 
         Button button = new Button();
