@@ -6,13 +6,49 @@ using System.Windows.Forms;
 // WinForms UI for collecting EMM/PMX/PMM remap inputs.
 internal sealed class EmmRemapForm : Form
 {
-    private readonly TextBox _basePmxTextBox;
-    private readonly TextBox _emmTextBox;
-    private readonly TextBox _modifiedPmxTextBox;
-    private readonly TextBox _outputEmmTextBox;
-    private readonly TextBox _pmmTextBox;
-    private readonly TextBox _outputPmmTextBox;
+    private sealed class PathRow
+    {
+        public readonly Label Label;
+        public readonly TextBox TextBox;
+        public readonly Button Button;
+
+        public PathRow(Label label, TextBox textBox, Button button)
+        {
+            Label = label;
+            TextBox = textBox;
+            Button = button;
+        }
+
+        public void SetVisible(bool visible)
+        {
+            Label.Visible = visible;
+            TextBox.Visible = visible;
+            Button.Visible = visible;
+        }
+
+        public void SetTop(int top)
+        {
+            Label.Location = new Point(12, top + 6);
+            TextBox.Location = new Point(136, top);
+            Button.Location = new Point(634, top - 1);
+        }
+    }
+
+    private readonly Label _descriptionLabel;
+    private readonly Label _currentModelLabel;
+    private readonly PathRow _basePmxRow;
+    private readonly PathRow _emmRow;
+    private readonly PathRow _modifiedPmxRow;
+    private readonly PathRow _outputEmmRow;
+    private readonly PathRow _pmmRow;
+    private readonly PathRow _outputPmmRow;
+    private readonly Label _modeLabel;
+    private readonly RadioButton _standardModeRadioButton;
+    private readonly RadioButton _detailModeRadioButton;
     private readonly CheckBox _keepOriginalModelPathCheckBox;
+    private readonly Button _runButton;
+    private readonly Button _cancelButton;
+    private bool _isDetailMode;
 
     public EmmRemapForm(string currentModelHint)
     {
@@ -21,45 +57,79 @@ internal sealed class EmmRemapForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(720, 444);
+        ClientSize = new Size(720, 368);
 
         Font = SystemFonts.MessageBoxFont;
 
-        Label descriptionLabel = new Label();
-        descriptionLabel.AutoSize = false;
-        descriptionLabel.Location = new Point(12, 12);
-        descriptionLabel.Size = new Size(696, 44);
-        descriptionLabel.Text = "改造前PMX(任意)が未指定なら現在ロード中モデルを改造前として使用し、指定時はそのPMXを優先します。"
+        _descriptionLabel = new Label();
+        _descriptionLabel.AutoSize = false;
+        _descriptionLabel.Location = new Point(12, 12);
+        _descriptionLabel.Size = new Size(496, 44);
+        _descriptionLabel.Text = "ベースPMX(任意)が未指定なら現在ロード中モデルをベースとして使用します。"
             + Environment.NewLine
-            + "各入力欄はファイルのドラッグ＆ドロップにも対応しています。";
-        Controls.Add(descriptionLabel);
+            + "標準モードではベースPMMからベースEMMと出力先を自動決定します。";
+        Controls.Add(_descriptionLabel);
 
-        Label currentModelLabel = new Label();
-        currentModelLabel.AutoSize = false;
-        currentModelLabel.Location = new Point(12, 60);
-        currentModelLabel.Size = new Size(696, 20);
-        currentModelLabel.Text = "現在モデル: " + currentModelHint;
-        Controls.Add(currentModelLabel);
+        _modeLabel = new Label();
+        _modeLabel.AutoSize = true;
+        _modeLabel.Location = new Point(518, 16);
+        _modeLabel.Text = "表示:";
+        Controls.Add(_modeLabel);
 
-        _basePmxTextBox = CreateOpenPathRow("改造前PMX(任意)", 108, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
-        _emmTextBox = CreateOpenPathRow("入力EMM", 154, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
-        _modifiedPmxTextBox = CreateOpenPathRow("改造後PMX", 200, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
-        _outputEmmTextBox = CreateSavePathRow("出力EMM", 246, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
-        _pmmTextBox = CreateOpenPathRow("入力PMM(任意)", 292, "PMM Files (*.pmm)|*.pmm|All Files (*.*)|*.*");
-        _outputPmmTextBox = CreateSavePathRow("出力PMM(任意)", 338, "PMM Files (*.pmm)|*.pmm|All Files (*.*)|*.*");
+        _standardModeRadioButton = new RadioButton();
+        _standardModeRadioButton.AutoSize = true;
+        _standardModeRadioButton.Location = new Point(562, 14);
+        _standardModeRadioButton.Text = "標準";
+        _standardModeRadioButton.Checked = true;
+        _standardModeRadioButton.CheckedChanged += delegate
+        {
+            if (_standardModeRadioButton.Checked)
+            {
+                ApplyModeLayout(false);
+            }
+        };
+        Controls.Add(_standardModeRadioButton);
+
+        _detailModeRadioButton = new RadioButton();
+        _detailModeRadioButton.AutoSize = true;
+        _detailModeRadioButton.Location = new Point(622, 14);
+        _detailModeRadioButton.Text = "詳細";
+        _detailModeRadioButton.CheckedChanged += delegate
+        {
+            if (_detailModeRadioButton.Checked)
+            {
+                ApplyModeLayout(true);
+            }
+        };
+        Controls.Add(_detailModeRadioButton);
+
+        _currentModelLabel = new Label();
+        _currentModelLabel.AutoSize = false;
+        _currentModelLabel.Location = new Point(12, 60);
+        _currentModelLabel.Size = new Size(696, 20);
+        _currentModelLabel.Text = "現在のモデル: " + currentModelHint;
+        Controls.Add(_currentModelLabel);
+
+        _pmmRow = CreateOpenPathRow("ベースPMM(入力)", 108, "PMM Files (*.pmm)|*.pmm|All Files (*.*)|*.*");
+        _emmRow = CreateOpenPathRow("ベースEMM", 154, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
+        _basePmxRow = CreateOpenPathRow("ベースPMX(任意)", 200, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
+        _modifiedPmxRow = CreateOpenPathRow("更新後PMX", 246, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
+        _outputPmmRow = CreateSavePathRow("出力PMM", 292, "PMM Files (*.pmm)|*.pmm|All Files (*.*)|*.*");
+        _outputEmmRow = CreateSavePathRow("出力EMM", 338, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
 
         _keepOriginalModelPathCheckBox = new CheckBox();
         _keepOriginalModelPathCheckBox.Text = "出力内のモデルパスを変更しない";
-        _keepOriginalModelPathCheckBox.Location = new Point(24, 380);
+        _keepOriginalModelPathCheckBox.Location = new Point(24, 274);
         _keepOriginalModelPathCheckBox.Size = new Size(680, 24);
         Controls.Add(_keepOriginalModelPathCheckBox);
 
-        Button runButton = new Button();
-        runButton.Text = "実行";
-        runButton.Location = new Point(552, 408);
-        runButton.Size = new Size(75, 28);
-        runButton.Click += delegate
+        _runButton = new Button();
+        _runButton.Text = "実行";
+        _runButton.Location = new Point(552, 328);
+        _runButton.Size = new Size(75, 28);
+        _runButton.Click += delegate
         {
+            EnsureDerivedPathsFromBasePmm(!_isDetailMode);
             string validationMessage = ValidateFormInput();
             if (validationMessage.Length > 0)
             {
@@ -70,90 +140,190 @@ internal sealed class EmmRemapForm : Form
             DialogResult = DialogResult.OK;
             Close();
         };
-        Controls.Add(runButton);
+        Controls.Add(_runButton);
 
-        Button cancelButton = new Button();
-        cancelButton.Text = "キャンセル";
-        cancelButton.Location = new Point(633, 408);
-        cancelButton.Size = new Size(75, 28);
-        cancelButton.DialogResult = DialogResult.Cancel;
-        Controls.Add(cancelButton);
+        _cancelButton = new Button();
+        _cancelButton.Text = "キャンセル";
+        _cancelButton.Location = new Point(633, 328);
+        _cancelButton.Size = new Size(75, 28);
+        _cancelButton.DialogResult = DialogResult.Cancel;
+        Controls.Add(_cancelButton);
 
-        AcceptButton = runButton;
-        CancelButton = cancelButton;
+        AcceptButton = _runButton;
+        CancelButton = _cancelButton;
 
-        _emmTextBox.TextChanged += delegate
+        _emmRow.TextBox.TextChanged += delegate
         {
-            SetDefaultOutputPathIfEmpty(_emmTextBox, _outputEmmTextBox, "_remapped.emm");
+            if (_isDetailMode)
+            {
+                SetDefaultOutputPathIfEmpty(_emmRow.TextBox, _outputEmmRow.TextBox, "_remapped.emm");
+            }
         };
 
-        _pmmTextBox.TextChanged += delegate
+        _pmmRow.TextBox.TextChanged += delegate
         {
-            SetDefaultOutputPathIfEmpty(_pmmTextBox, _outputPmmTextBox, "_remapped.pmm");
+            EnsureDerivedPathsFromBasePmm(!_isDetailMode);
         };
+
+        ApplyModeLayout(false);
     }
 
     public RemapRequest BuildRemapRequest()
     {
+        EnsureDerivedPathsFromBasePmm(!_isDetailMode);
+
         RemapRequest input = new RemapRequest();
-        input.BasePmxPath = _basePmxTextBox.Text.Trim();
-        input.EmmPath = _emmTextBox.Text.Trim();
-        input.ModifiedPmxPath = _modifiedPmxTextBox.Text.Trim();
-        input.OutputEmmPath = _outputEmmTextBox.Text.Trim();
-        input.PmmPath = _pmmTextBox.Text.Trim();
-        input.OutputPmmPath = _outputPmmTextBox.Text.Trim();
+        input.BasePmxPath = _basePmxRow.TextBox.Text.Trim();
+        input.EmmPath = _emmRow.TextBox.Text.Trim();
+        input.ModifiedPmxPath = _modifiedPmxRow.TextBox.Text.Trim();
+        input.OutputEmmPath = _outputEmmRow.TextBox.Text.Trim();
+        input.PmmPath = _pmmRow.TextBox.Text.Trim();
+        input.OutputPmmPath = _outputPmmRow.TextBox.Text.Trim();
         input.KeepOriginalModelPath = _keepOriginalModelPathCheckBox.Checked;
         return input;
     }
 
     private string ValidateFormInput()
     {
-        string basePmxPath = _basePmxTextBox.Text.Trim();
+        string basePmxPath = _basePmxRow.TextBox.Text.Trim();
         if (basePmxPath.Length > 0 && !File.Exists(basePmxPath))
         {
-            return "改造前PMXが見つかりません。";
+            return "ベースPMXが見つかりません。";
         }
 
-        string emmPath = _emmTextBox.Text.Trim();
-        if (emmPath.Length == 0)
-        {
-            return "入力EMMを指定してください。";
-        }
-
-        if (!File.Exists(emmPath))
-        {
-            return "入力EMMが見つかりません。";
-        }
-
-        string modifiedPmxPath = _modifiedPmxTextBox.Text.Trim();
+        string modifiedPmxPath = _modifiedPmxRow.TextBox.Text.Trim();
         if (modifiedPmxPath.Length == 0)
         {
-            return "改造後PMXを指定してください。";
+            return "更新後PMXを指定してください。";
         }
 
         if (!File.Exists(modifiedPmxPath))
         {
-            return "改造後PMXが見つかりません。";
+            return "更新後PMXが見つかりません。";
         }
 
-        if (_outputEmmTextBox.Text.Trim().Length == 0)
+        string pmmPath = _pmmRow.TextBox.Text.Trim();
+        if (pmmPath.Length > 0 && !File.Exists(pmmPath))
+        {
+            return "ベースPMMが見つかりません。";
+        }
+
+        string emmPath = _emmRow.TextBox.Text.Trim();
+        if (emmPath.Length == 0)
+        {
+            return _isDetailMode
+                ? "ベースPMMまたはベースEMMを指定してください。"
+                : "ベースPMMを指定してください。";
+        }
+
+        if (!File.Exists(emmPath))
+        {
+            return "ベースEMMが見つかりません。";
+        }
+
+        if (_outputEmmRow.TextBox.Text.Trim().Length == 0)
         {
             return "出力EMMを指定してください。";
         }
 
-        string pmmPath = _pmmTextBox.Text.Trim();
-        string outputPmmPath = _outputPmmTextBox.Text.Trim();
-        if (pmmPath.Length > 0 && !File.Exists(pmmPath))
-        {
-            return "入力PMMが見つかりません。";
-        }
-
+        string outputPmmPath = _outputPmmRow.TextBox.Text.Trim();
         if (pmmPath.Length > 0 && outputPmmPath.Length == 0)
         {
-            return "入力PMMを指定した場合は出力PMMも指定してください。";
+            return "ベースPMMを指定した場合は出力PMMも指定してください。";
         }
 
         return string.Empty;
+    }
+
+    private void ApplyModeLayout(bool isDetailMode)
+    {
+        _isDetailMode = isDetailMode;
+
+        _emmRow.SetVisible(isDetailMode);
+        _outputEmmRow.SetVisible(isDetailMode);
+        _outputPmmRow.SetVisible(isDetailMode);
+
+        int top = 108;
+        _pmmRow.SetTop(top);
+        top += 46;
+
+        if (isDetailMode)
+        {
+            _emmRow.SetTop(top);
+            top += 46;
+        }
+
+        _basePmxRow.SetTop(top);
+        top += 46;
+
+        _modifiedPmxRow.SetTop(top);
+        top += 46;
+
+        if (isDetailMode)
+        {
+            _outputPmmRow.SetTop(top);
+            top += 46;
+
+            _outputEmmRow.SetTop(top);
+            top += 46;
+        }
+
+        _keepOriginalModelPathCheckBox.Location = new Point(24, top);
+
+        int buttonTop = top + 34;
+        _runButton.Location = new Point(552, buttonTop);
+        _cancelButton.Location = new Point(633, buttonTop);
+        ClientSize = new Size(720, buttonTop + 36);
+
+        EnsureDerivedPathsFromBasePmm(!isDetailMode);
+    }
+
+    private void EnsureDerivedPathsFromBasePmm(bool forceOverride)
+    {
+        string pmmPath = _pmmRow.TextBox.Text.Trim();
+        if (pmmPath.Length == 0)
+        {
+            if (forceOverride)
+            {
+                _emmRow.TextBox.Text = string.Empty;
+                _outputEmmRow.TextBox.Text = string.Empty;
+                _outputPmmRow.TextBox.Text = string.Empty;
+            }
+
+            return;
+        }
+
+        if (pmmPath.Length > 0)
+        {
+            string derivedEmmPath = Path.ChangeExtension(pmmPath, ".emm");
+            if (forceOverride || _emmRow.TextBox.Text.Trim().Length == 0)
+            {
+                _emmRow.TextBox.Text = derivedEmmPath;
+            }
+
+            if (forceOverride || _outputPmmRow.TextBox.Text.Trim().Length == 0)
+            {
+                _outputPmmRow.TextBox.Text = BuildRemappedPath(pmmPath, ".pmm");
+            }
+        }
+
+        string emmPath = _emmRow.TextBox.Text.Trim();
+        if (emmPath.Length > 0 && (forceOverride || _outputEmmRow.TextBox.Text.Trim().Length == 0))
+        {
+            _outputEmmRow.TextBox.Text = BuildRemappedPath(emmPath, ".emm");
+        }
+    }
+
+    private static string BuildRemappedPath(string inputPath, string extension)
+    {
+        string directory = Path.GetDirectoryName(inputPath);
+        string nameWithoutExtension = Path.GetFileNameWithoutExtension(inputPath);
+        if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(nameWithoutExtension))
+        {
+            return string.Empty;
+        }
+
+        return Path.Combine(directory, nameWithoutExtension + "_remapped" + extension);
     }
 
     private static void SetDefaultOutputPathIfEmpty(TextBox inputTextBox, TextBox outputTextBox, string suffix)
@@ -179,17 +349,17 @@ internal sealed class EmmRemapForm : Form
         outputTextBox.Text = Path.Combine(directory, nameWithoutExtension + suffix);
     }
 
-    private TextBox CreateOpenPathRow(string labelText, int top, string filter)
+    private PathRow CreateOpenPathRow(string labelText, int top, string filter)
     {
         return CreatePathRow(labelText, top, filter, false);
     }
 
-    private TextBox CreateSavePathRow(string labelText, int top, string filter)
+    private PathRow CreateSavePathRow(string labelText, int top, string filter)
     {
         return CreatePathRow(labelText, top, filter, true);
     }
 
-    private TextBox CreatePathRow(string labelText, int top, string filter, bool saveMode)
+    private PathRow CreatePathRow(string labelText, int top, string filter, bool saveMode)
     {
         Label label = new Label();
         label.AutoSize = true;
@@ -290,6 +460,6 @@ internal sealed class EmmRemapForm : Form
         };
         Controls.Add(button);
 
-        return textBox;
+        return new PathRow(label, textBox, button);
     }
 }

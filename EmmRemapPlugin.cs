@@ -103,7 +103,7 @@ public class CSScriptClass : PEPluginClass
                 }
 
                 result.PmmUpdated = false;
-                result.PmmUpdateMessage = "入力PMMをそのまま出力しました。";
+                result.PmmUpdateMessage = "ベースPMMをそのまま出力しました。";
             }
             else
             {
@@ -168,27 +168,27 @@ public class CSScriptClass : PEPluginClass
 
         if (input.EmmPath.Length == 0)
         {
-            throw new InvalidOperationException("入力EMMを指定してください。");
+            throw new InvalidOperationException("ベースEMMを指定してください。");
         }
 
         if (!File.Exists(input.EmmPath))
         {
-            throw new FileNotFoundException("入力EMMが見つかりません。", input.EmmPath);
+            throw new FileNotFoundException("ベースEMMが見つかりません。", input.EmmPath);
         }
 
         if (input.BasePmxPath.Length > 0 && !File.Exists(input.BasePmxPath))
         {
-            throw new FileNotFoundException("改造前PMXが見つかりません。", input.BasePmxPath);
+            throw new FileNotFoundException("ベースPMXが見つかりません。", input.BasePmxPath);
         }
 
         if (input.ModifiedPmxPath.Length == 0)
         {
-            throw new InvalidOperationException("改造後PMXを指定してください。");
+            throw new InvalidOperationException("更新後PMXを指定してください。");
         }
 
         if (!File.Exists(input.ModifiedPmxPath))
         {
-            throw new FileNotFoundException("改造後PMXが見つかりません。", input.ModifiedPmxPath);
+            throw new FileNotFoundException("更新後PMXが見つかりません。", input.ModifiedPmxPath);
         }
 
         if (input.OutputEmmPath.Length == 0)
@@ -198,12 +198,12 @@ public class CSScriptClass : PEPluginClass
 
         if (input.PmmPath.Length > 0 && !File.Exists(input.PmmPath))
         {
-            throw new FileNotFoundException("入力PMMが見つかりません。", input.PmmPath);
+            throw new FileNotFoundException("ベースPMMが見つかりません。", input.PmmPath);
         }
 
         if (input.PmmPath.Length > 0 && input.OutputPmmPath.Length == 0)
         {
-            throw new InvalidOperationException("入力PMMを指定した場合は出力PMMも指定してください。");
+            throw new InvalidOperationException("ベースPMMを指定した場合は出力PMMも指定してください。");
         }
     }
 
@@ -214,19 +214,19 @@ public class CSScriptClass : PEPluginClass
         builder.AppendLine();
         if (result.Input.BasePmxPath.Length > 0)
         {
-            builder.AppendLine("改造前PMX指定: あり");
-            builder.AppendLine("改造前PMX: " + result.Input.BasePmxPath);
+            builder.AppendLine("ベースPMX指定: あり");
+            builder.AppendLine("ベースPMX: " + result.Input.BasePmxPath);
         }
         else
         {
-            builder.AppendLine("改造前PMX指定: なし (現在ロード中モデルを使用)");
+            builder.AppendLine("ベースPMX指定: なし (現在ロード中モデルを使用)");
         }
         builder.AppendLine();
         builder.AppendLine("対象モデルキー: " + result.ObjectKey);
         builder.AppendLine("EMM 内の元モデル: " + result.SourceObjectPath);
         builder.AppendLine("出力後モデルパス: " + result.OutputObjectPath);
-        builder.AppendLine("改造前材質数: " + result.BaseMaterialNames.Count);
-        builder.AppendLine("改造後材質数: " + result.ModifiedMaterialNames.Count);
+        builder.AppendLine("ベース材質数: " + result.BaseMaterialNames.Count);
+        builder.AppendLine("更新後材質数: " + result.ModifiedMaterialNames.Count);
         builder.AppendLine("材質名一致で対応付けできた数: " + result.RemappedMaterialCount);
         builder.AppendLine();
         builder.AppendLine("EMM 反映結果:");
@@ -248,14 +248,14 @@ public class CSScriptClass : PEPluginClass
         if (result.UnmatchedBaseMaterials.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("改造前にのみ存在する材質:");
+            builder.AppendLine("ベース側にのみ存在する材質:");
             AppendMaterialList(builder, result.UnmatchedBaseMaterials);
         }
 
         if (result.UnmatchedModifiedMaterials.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("改造後にのみ存在する材質:");
+            builder.AppendLine("更新後側にのみ存在する材質:");
             AppendMaterialList(builder, result.UnmatchedModifiedMaterials);
         }
 

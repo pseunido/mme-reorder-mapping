@@ -124,7 +124,7 @@ internal sealed class EmmDocument
 
         if (exactMatches.Count > 1)
         {
-            throw new InvalidOperationException("EMM 内で現在ロード中モデルに一致するオブジェクトキーが複数見つかりました。改造前PMX(任意)を指定して対象を明示してください。");
+            throw new InvalidOperationException("EMM 内で現在ロード中モデルに一致するオブジェクトキーが複数見つかりました。ベースPMX(任意)を指定して対象を明示してください。");
         }
 
         throw new InvalidOperationException("EMM 内で現在ロード中モデルに対応するオブジェクトキーを見つけられませんでした。現在の材質構成と一致する PMX が [Object] セクションにあるか確認してください。");
@@ -185,7 +185,7 @@ internal sealed class EmmDocument
 
         if (exactMatches.Count > 1)
         {
-            throw new InvalidOperationException("EMM 内で改造前PMXに一致するオブジェクトキーが複数見つかりました。");
+            throw new InvalidOperationException("EMM 内でベースPMXに一致するオブジェクトキーが複数見つかりました。");
         }
 
         if (fileNameMatches.Count == 1)
@@ -195,10 +195,10 @@ internal sealed class EmmDocument
 
         if (fileNameMatches.Count > 1)
         {
-            throw new InvalidOperationException("EMM 内で同名PMXが複数見つかりました。改造前PMXの絶対パス一致で特定できるように EMM 内容を確認してください。");
+            throw new InvalidOperationException("EMM 内で同名PMXが複数見つかりました。ベースPMXの絶対パス一致で特定できるように EMM 内容を確認してください。");
         }
 
-        throw new InvalidOperationException("EMM 内で指定した改造前PMXに対応するオブジェクトキーを見つけられませんでした。");
+        throw new InvalidOperationException("EMM 内で指定したベースPMXに対応するオブジェクトキーを見つけられませんでした。");
     }
 
     public void SetObjectPath(string objectKey, string newPath)
