@@ -64,6 +64,7 @@ public class CSScriptClass : PEPluginClass
 
         List<string> modifiedMaterialNames = PmxMaterialReader.ReadMaterialNames(input.ModifiedPmxPath);
         string objectKey = objectMatch.ObjectKey;
+        string outputObjectPath = input.KeepOriginalModelPath ? objectMatch.ObjectPath : input.ModifiedPmxPath;
 
         Dictionary<int, int> materialMap = MaterialIndexMapper.BuildMap(baseMaterialNames, modifiedMaterialNames);
         // Only update the object path if not keeping the original
@@ -81,12 +82,35 @@ public class CSScriptClass : PEPluginClass
         result.Input = input;
         result.ObjectKey = objectKey;
         result.SourceObjectPath = objectMatch.ObjectPath;
+        result.OutputObjectPath = outputObjectPath;
         result.BaseMaterialNames = baseMaterialNames;
         result.ModifiedMaterialNames = modifiedMaterialNames;
         result.RemappedMaterialCount = materialMap.Count;
         result.UnmatchedBaseMaterials = MaterialIndexMapper.FindUnmatchedBaseMaterials(baseMaterialNames, materialMap);
         result.UnmatchedModifiedMaterials = MaterialIndexMapper.FindUnmatchedModifiedMaterials(modifiedMaterialNames, materialMap);
         result.RemapStats = remapStats;
+
+        if (input.PmmPath.Length > 0)
+        {
+            if (input.KeepOriginalModelPath)
+            {
+                if (!string.Equals(PathHelper.NormalizePath(input.PmmPath), PathHelper.NormalizePath(input.OutputPmmPath), StringComparison.OrdinalIgnoreCase))
+                {
+                    EnsureOutputDirectory(input.OutputPmmPath);
+                    File.Copy(input.PmmPath, input.OutputPmmPath, true);
+                }
+
+                result.PmmUpdated = false;
+                result.PmmUpdateMessage = "入力PMMをそのまま出力しました。";
+            }
+            else
+            {
+                PmmRewriteResult pmmResult = PmmPathRewriter.TryRewriteModelPath(input.PmmPath, input.OutputPmmPath, objectMatch.ObjectPath, input.ModifiedPmxPath);
+                result.PmmUpdated = pmmResult.Updated;
+                result.PmmUpdateMessage = pmmResult.Message;
+            }
+        }
+
         return result;
     }
 
@@ -169,6 +193,16 @@ public class CSScriptClass : PEPluginClass
         {
             throw new InvalidOperationException("出力EMMを指定してください。");
         }
+
+        if (input.PmmPath.Length > 0 && !File.Exists(input.PmmPath))
+        {
+            throw new FileNotFoundException("入力PMMが見つかりません。", input.PmmPath);
+        }
+
+        if (input.PmmPath.Length > 0 && input.OutputPmmPath.Length == 0)
+        {
+            throw new InvalidOperationException("入力PMMを指定した場合は出力PMMも指定してください。");
+        }
     }
 
     private static string BuildSummary(RemapExecutionResult result)
@@ -188,6 +222,7 @@ public class CSScriptClass : PEPluginClass
         builder.AppendLine();
         builder.AppendLine("対象モデルキー: " + result.ObjectKey);
         builder.AppendLine("EMM 内の元モデル: " + result.SourceObjectPath);
+        builder.AppendLine("出力後モデルパス: " + result.OutputObjectPath);
         builder.AppendLine("改造前材質数: " + result.BaseMaterialNames.Count);
         builder.AppendLine("改造後材質数: " + result.ModifiedMaterialNames.Count);
         builder.AppendLine("材質名一致で対応付けできた数: " + result.RemappedMaterialCount);
@@ -199,6 +234,14 @@ public class CSScriptClass : PEPluginClass
         builder.AppendLine();
         builder.AppendLine("出力先:");
         builder.AppendLine(result.Input.OutputEmmPath);
+
+        if (result.Input.PmmPath.Length > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("PMM 出力:");
+            builder.AppendLine(result.Input.OutputPmmPath);
+            builder.AppendLine("PMM 更新結果: " + result.PmmUpdateMessage);
+        }
 
         if (result.UnmatchedBaseMaterials.Count > 0)
         {
@@ -246,6 +289,8 @@ internal sealed class PluginInput
     public string EmmPath = string.Empty;
     public string ModifiedPmxPath = string.Empty;
     public string OutputEmmPath = string.Empty;
+    public string PmmPath = string.Empty;
+    public string OutputPmmPath = string.Empty;
     public bool KeepOriginalModelPath = false;
 }
 
@@ -254,12 +299,15 @@ internal sealed class RemapExecutionResult
     public PluginInput Input;
     public string ObjectKey = string.Empty;
     public string SourceObjectPath = string.Empty;
+    public string OutputObjectPath = string.Empty;
     public List<string> BaseMaterialNames = new List<string>();
     public List<string> ModifiedMaterialNames = new List<string>();
     public int RemappedMaterialCount;
     public List<MaterialNameEntry> UnmatchedBaseMaterials = new List<MaterialNameEntry>();
     public List<MaterialNameEntry> UnmatchedModifiedMaterials = new List<MaterialNameEntry>();
     public MaterialRemapStats RemapStats = new MaterialRemapStats();
+    public bool PmmUpdated;
+    public string PmmUpdateMessage = string.Empty;
 }
 
 internal sealed class EmmObjectMatch
@@ -875,6 +923,123 @@ internal static class PathHelper
     }
 }
 
+internal sealed class PmmRewriteResult
+{
+    public bool Updated;
+    public string Message = string.Empty;
+}
+
+internal static class PmmPathRewriter
+{
+    private static readonly Encoding PmmEncoding = Encoding.GetEncoding(932);
+
+    public static PmmRewriteResult TryRewriteModelPath(string inputPath, string outputPath, string sourcePath, string targetPath)
+    {
+        PmmRewriteResult result = new PmmRewriteResult();
+
+        string normalizedSourcePath = PathHelper.NormalizePath(sourcePath);
+        string normalizedTargetPath = PathHelper.NormalizePath(targetPath);
+        if (normalizedSourcePath.Length == 0 || normalizedTargetPath.Length == 0)
+        {
+            result.Message = "PMM の対象パスを確定できませんでした。";
+            return result;
+        }
+
+        byte[] bytes = File.ReadAllBytes(inputPath);
+        byte[] sourceBytes = PmmEncoding.GetBytes(normalizedSourcePath);
+        byte[] targetBytes = PmmEncoding.GetBytes(normalizedTargetPath);
+        List<int> candidateOffsets = FindNullTerminatedMatches(bytes, sourceBytes);
+
+        if (candidateOffsets.Count == 0)
+        {
+            result.Message = "PMM 内で対象モデルパスを見つけられませんでした。";
+            return result;
+        }
+
+        if (candidateOffsets.Count > 1)
+        {
+            result.Message = "PMM 内で対象モデルパス候補が複数見つかったため、安全のため更新を中止しました。";
+            return result;
+        }
+
+        int offset = candidateOffsets[0];
+        int fieldLength = MeasureNullPaddedFieldLength(bytes, offset, sourceBytes.Length);
+        if (targetBytes.Length >= fieldLength)
+        {
+            result.Message = "改造後PMXパスが PMM 内の空き領域に収まらないため、PMM 更新を中止しました。";
+            return result;
+        }
+
+        Array.Clear(bytes, offset, fieldLength);
+        Array.Copy(targetBytes, 0, bytes, offset, targetBytes.Length);
+
+        EnsureOutputDirectory(outputPath);
+        File.WriteAllBytes(outputPath, bytes);
+        result.Updated = true;
+        result.Message = "対象モデルパスを更新して PMM を出力しました。";
+        return result;
+    }
+
+    private static void EnsureOutputDirectory(string outputPath)
+    {
+        string directory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+    }
+
+    private static List<int> FindNullTerminatedMatches(byte[] bytes, byte[] pattern)
+    {
+        List<int> offsets = new List<int>();
+        if (bytes == null || pattern == null || pattern.Length == 0 || bytes.Length < pattern.Length + 1)
+        {
+            return offsets;
+        }
+
+        for (int index = 0; index <= bytes.Length - pattern.Length - 1; index++)
+        {
+            if (!IsMatch(bytes, index, pattern))
+            {
+                continue;
+            }
+
+            if (bytes[index + pattern.Length] != 0)
+            {
+                continue;
+            }
+
+            offsets.Add(index);
+        }
+
+        return offsets;
+    }
+
+    private static int MeasureNullPaddedFieldLength(byte[] bytes, int offset, int contentLength)
+    {
+        int index = offset + contentLength;
+        while (index < bytes.Length && bytes[index] == 0)
+        {
+            index++;
+        }
+
+        return index - offset;
+    }
+
+    private static bool IsMatch(byte[] bytes, int offset, byte[] pattern)
+    {
+        for (int index = 0; index < pattern.Length; index++)
+        {
+            if (bytes[offset + index] != pattern[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 internal sealed class DetectedTextFile
 {
     public string Text = string.Empty;
@@ -1112,6 +1277,8 @@ internal sealed class MainForm : Form
     private readonly TextBox _emmTextBox;
     private readonly TextBox _modifiedPmxTextBox;
     private readonly TextBox _outputEmmTextBox;
+    private readonly TextBox _pmmTextBox;
+    private readonly TextBox _outputPmmTextBox;
     private readonly CheckBox _keepOriginalModelPathCheckBox;
 
     public MainForm(string currentModelHint)
@@ -1121,7 +1288,7 @@ internal sealed class MainForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(720, 352);
+        ClientSize = new Size(720, 444);
 
         Font = SystemFonts.MessageBoxFont;
 
@@ -1145,15 +1312,17 @@ internal sealed class MainForm : Form
         _emmTextBox = AddPathRow("入力EMM", 154, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
         _modifiedPmxTextBox = AddPathRow("改造後PMX", 200, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
         _outputEmmTextBox = AddSavePathRow("出力EMM", 246, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
+        _pmmTextBox = AddPathRow("入力PMM(任意)", 292, "PMM Files (*.pmm)|*.pmm|All Files (*.*)|*.*");
+        _outputPmmTextBox = AddSavePathRow("出力PMM(任意)", 338, "PMM Files (*.pmm)|*.pmm|All Files (*.*)|*.*");
         _keepOriginalModelPathCheckBox = new CheckBox();
-        _keepOriginalModelPathCheckBox.Text = "モデルのファイルパスを変更しない";
-        _keepOriginalModelPathCheckBox.Location = new Point(24, 288);
+        _keepOriginalModelPathCheckBox.Text = "出力内のモデルパスを変更しない";
+        _keepOriginalModelPathCheckBox.Location = new Point(24, 380);
         _keepOriginalModelPathCheckBox.Size = new Size(680, 24);
         Controls.Add(_keepOriginalModelPathCheckBox);
 
         Button runButton = new Button();
         runButton.Text = "実行";
-        runButton.Location = new Point(552, 318);
+        runButton.Location = new Point(552, 408);
         runButton.Size = new Size(75, 28);
         runButton.Click += delegate
         {
@@ -1171,7 +1340,7 @@ internal sealed class MainForm : Form
 
         Button cancelButton = new Button();
         cancelButton.Text = "キャンセル";
-        cancelButton.Location = new Point(633, 318);
+        cancelButton.Location = new Point(633, 408);
         cancelButton.Size = new Size(75, 28);
         cancelButton.DialogResult = DialogResult.Cancel;
         Controls.Add(cancelButton);
@@ -1201,6 +1370,29 @@ internal sealed class MainForm : Form
 
             _outputEmmTextBox.Text = Path.Combine(directory, nameWithoutExtension + "_remapped.emm");
         };
+
+        _pmmTextBox.TextChanged += delegate
+        {
+            if (_outputPmmTextBox.Text.Trim().Length > 0)
+            {
+                return;
+            }
+
+            string pmmPath = _pmmTextBox.Text.Trim();
+            if (pmmPath.Length == 0)
+            {
+                return;
+            }
+
+            string directory = Path.GetDirectoryName(pmmPath);
+            string nameWithoutExtension = Path.GetFileNameWithoutExtension(pmmPath);
+            if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(nameWithoutExtension))
+            {
+                return;
+            }
+
+            _outputPmmTextBox.Text = Path.Combine(directory, nameWithoutExtension + "_remapped.pmm");
+        };
     }
 
     public PluginInput BuildInput()
@@ -1210,6 +1402,8 @@ internal sealed class MainForm : Form
         input.EmmPath = _emmTextBox.Text.Trim();
         input.ModifiedPmxPath = _modifiedPmxTextBox.Text.Trim();
         input.OutputEmmPath = _outputEmmTextBox.Text.Trim();
+        input.PmmPath = _pmmTextBox.Text.Trim();
+        input.OutputPmmPath = _outputPmmTextBox.Text.Trim();
         input.KeepOriginalModelPath = _keepOriginalModelPathCheckBox.Checked;
         return input;
     }
@@ -1247,6 +1441,18 @@ internal sealed class MainForm : Form
         if (_outputEmmTextBox.Text.Trim().Length == 0)
         {
             return "出力EMMを指定してください。";
+        }
+
+        string pmmPath = _pmmTextBox.Text.Trim();
+        string outputPmmPath = _outputPmmTextBox.Text.Trim();
+        if (pmmPath.Length > 0 && !File.Exists(pmmPath))
+        {
+            return "入力PMMが見つかりません。";
+        }
+
+        if (pmmPath.Length > 0 && outputPmmPath.Length == 0)
+        {
+            return "入力PMMを指定した場合は出力PMMも指定してください。";
         }
 
         return string.Empty;
