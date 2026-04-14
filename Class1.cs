@@ -66,7 +66,11 @@ public class CSScriptClass : PEPluginClass
         string objectKey = objectMatch.ObjectKey;
 
         Dictionary<int, int> materialMap = MaterialIndexMapper.BuildMap(baseMaterialNames, modifiedMaterialNames);
-        document.UpdateObjectPath(objectKey, input.ModifiedPmxPath);
+        // Only update the object path if not keeping the original
+        if (!input.KeepOriginalModelPath)
+        {
+            document.UpdateObjectPath(objectKey, input.ModifiedPmxPath);
+        }
 
         MaterialRemapStats remapStats = document.RemapMaterialAssignments(objectKey, materialMap, modifiedMaterialNames.Count);
 
@@ -242,6 +246,7 @@ internal sealed class PluginInput
     public string EmmPath = string.Empty;
     public string ModifiedPmxPath = string.Empty;
     public string OutputEmmPath = string.Empty;
+    public bool KeepOriginalModelPath = false;
 }
 
 internal sealed class RemapExecutionResult
@@ -1107,6 +1112,7 @@ internal sealed class MainForm : Form
     private readonly TextBox _emmTextBox;
     private readonly TextBox _modifiedPmxTextBox;
     private readonly TextBox _outputEmmTextBox;
+    private readonly CheckBox _keepOriginalModelPathCheckBox;
 
     public MainForm(string currentModelHint)
     {
@@ -1139,6 +1145,11 @@ internal sealed class MainForm : Form
         _emmTextBox = AddPathRow("入力EMM", 154, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
         _modifiedPmxTextBox = AddPathRow("改造後PMX", 200, "PMX Files (*.pmx)|*.pmx|All Files (*.*)|*.*");
         _outputEmmTextBox = AddSavePathRow("出力EMM", 246, "EMM Files (*.emm)|*.emm|All Files (*.*)|*.*");
+        _keepOriginalModelPathCheckBox = new CheckBox();
+        _keepOriginalModelPathCheckBox.Text = "モデルのファイルパスを変更しない";
+        _keepOriginalModelPathCheckBox.Location = new Point(24, 288);
+        _keepOriginalModelPathCheckBox.Size = new Size(680, 24);
+        Controls.Add(_keepOriginalModelPathCheckBox);
 
         Button runButton = new Button();
         runButton.Text = "実行";
@@ -1199,6 +1210,7 @@ internal sealed class MainForm : Form
         input.EmmPath = _emmTextBox.Text.Trim();
         input.ModifiedPmxPath = _modifiedPmxTextBox.Text.Trim();
         input.OutputEmmPath = _outputEmmTextBox.Text.Trim();
+        input.KeepOriginalModelPath = _keepOriginalModelPathCheckBox.Checked;
         return input;
     }
 
