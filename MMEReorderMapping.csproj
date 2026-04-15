@@ -51,8 +51,17 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Class1.cs" />
+    <Compile Include="EmmDocument.cs" />
+    <Compile Include="EmmRemapForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="EmmRemapPlugin.cs" />
+    <Compile Include="MaterialIndexMapper.cs" />
+    <Compile Include="PathAndTextHelpers.cs" />
+    <Compile Include="PmmPathRewriter.cs" />
+    <Compile Include="PmxMaterialReader.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RemapModels.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
